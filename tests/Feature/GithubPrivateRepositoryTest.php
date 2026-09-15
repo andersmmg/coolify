@@ -82,6 +82,13 @@ function githubPrivateRepositoryTestPrivateKeyForTeam(Team $team): PrivateKey
 }
 
 describe('GitHub Private Repository Component', function () {
+    test('github app selection uses coolbox loading border', function () {
+        Livewire::test(GithubPrivateRepository::class, ['type' => 'private-gh-app'])
+            ->assertSee('wire:loading.class="coolbox-loading"', false)
+            ->assertSee('wire:target="loadRepositories('.$this->githubApp->id.')"', false)
+            ->assertDontSee('loading-spinner', false);
+    });
+
     test('loadRepositories fetches and displays repositories', function () {
         $repos = [
             ['id' => 1, 'name' => 'alpha-repo', 'owner' => ['login' => 'testuser']],
@@ -96,6 +103,72 @@ describe('GitHub Private Repository Component', function () {
             ->assertSet('current_step', 'repository')
             ->assertSet('total_repositories_count', 2)
             ->assertSet('selected_repository_id', 1);
+    });
+
+    test('repository selection uses the searchable listbox and disables loading action', function () {
+        fakeGithubHttp([
+            ['id' => 1, 'name' => 'alpha-repo', 'owner' => ['login' => 'testuser']],
+        ]);
+
+        Livewire::test(GithubPrivateRepository::class, ['type' => 'private-gh-app'])
+            ->call('loadRepositories', $this->githubApp->id)
+            ->assertSee('class="listbox-panel searchable-listbox-panel"', false)
+            ->assertSee('placeholder="Search repositories…"', false)
+            ->assertSee('wire:loading.attr="disabled"', false)
+            ->assertSee('wire:target="loadBranches,selected_repository_id"', false)
+            ->assertDontSee('<datalist', false);
+    });
+
+    test('loadBranches fetches available branches and selects the repository default branch', function () {
+        $repository = [
+            'id' => 1,
+            'name' => 'alpha-repo',
+            'default_branch' => 'production',
+            'owner' => ['login' => 'testuser'],
+        ];
+
+        fakeGithubHttp([$repository]);
+        Http::fake([
+            'https://api.github.com/zen' => Http::response('Keep it logically awesome.', 200, [
+                'Date' => now()->toRfc7231String(),
+            ]),
+            'https://api.github.com/app/installations/67890/access_tokens' => Http::response([
+                'token' => 'fake-installation-token',
+            ], 201),
+            'https://api.github.com/installation/repositories*' => Http::response([
+                'total_count' => 1,
+                'repositories' => [$repository],
+            ], 200),
+            'https://api.github.com/repos/testuser/alpha-repo/branches*' => Http::response([
+                ['name' => 'main'],
+                ['name' => 'feature/login'],
+                ['name' => 'production'],
+            ], 200),
+        ]);
+
+        Livewire::test(GithubPrivateRepository::class, ['type' => 'private-gh-app'])
+            ->call('loadRepositories', $this->githubApp->id)
+            ->call('loadBranches')
+            ->assertSet('selected_branch_name', 'production')
+            ->assertSet('branches', collect([
+                ['name' => 'main'],
+                ['name' => 'feature/login'],
+                ['name' => 'production'],
+            ]))
+            ->assertSee('placeholder="Search branches…"', false);
+    });
+
+    test('continue button uses the shared submit loading indicator', function () {
+        fakeGithubHttp([
+            ['id' => 1, 'name' => 'alpha-repo', 'owner' => ['login' => 'testuser']],
+        ]);
+
+        Livewire::test(GithubPrivateRepository::class, ['type' => 'private-gh-app'])
+            ->call('loadRepositories', $this->githubApp->id)
+            ->set('branches', collect([['name' => 'main']]))
+            ->assertSee('type="submit"', false)
+            ->assertSee('wire:target="submit"', false)
+            ->assertSee('wire:loading.class="is-loading"', false);
     });
 
     test('loadRepositories rejects a github app owned by another team', function () {
@@ -268,11 +341,11 @@ describe('GitHub Private Repository Component', function () {
 
         Livewire::test(GithubPrivateRepository::class, ['type' => 'private-gh-app'])
             ->call('loadRepositories', $this->githubApp->id)
-            ->assertSee('Refresh Repository List');
+            ->assertSee('Refresh');
     });
 
     test('refresh button is not visible before repositories are loaded', function () {
         Livewire::test(GithubPrivateRepository::class, ['type' => 'private-gh-app'])
-            ->assertDontSee('Refresh Repository List');
+            ->assertDontSee('Refresh');
     });
 });

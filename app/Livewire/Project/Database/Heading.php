@@ -35,6 +35,12 @@ class Heading extends Component
 
     public function activityFinished()
     {
+        if (auth()->user()->cannot('update', $this->database)) {
+            $this->dispatch('refresh');
+
+            return;
+        }
+
         try {
             // Only set started_at if database is actually running
             if ($this->database->isRunning()) {
@@ -90,18 +96,28 @@ class Heading extends Component
 
     public function restart()
     {
-        $this->authorize('manage', $this->database);
+        try {
+            $this->authorize('manage', $this->database);
 
-        $activity = RestartDatabase::run($this->database);
-        $this->dispatch('activityMonitor', $activity->id, ServiceStatusChanged::class);
+            $activity = RestartDatabase::run($this->database);
+            $this->js("window.dispatchEvent(new CustomEvent('startdatabase'))");
+            $this->dispatch('activityMonitor', $activity->id, ServiceStatusChanged::class);
+        } catch (\Throwable $e) {
+            return handleError($e, $this);
+        }
     }
 
     public function start()
     {
-        $this->authorize('manage', $this->database);
+        try {
+            $this->authorize('manage', $this->database);
 
-        $activity = StartDatabase::run($this->database);
-        $this->dispatch('activityMonitor', $activity->id, ServiceStatusChanged::class);
+            $activity = StartDatabase::run($this->database);
+            $this->js("window.dispatchEvent(new CustomEvent('startdatabase'))");
+            $this->dispatch('activityMonitor', $activity->id, ServiceStatusChanged::class);
+        } catch (\Throwable $e) {
+            return handleError($e, $this);
+        }
     }
 
     public function render()

@@ -8,6 +8,7 @@ use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 
 uses(RefreshDatabase::class);
@@ -81,6 +82,14 @@ it('skips the job when the second push is identical', function () use ($running)
     Queue::assertPushed(PushServerUpdateJob::class, 1);
 });
 
+it('does not audit successful sentinel pushes', function () use ($running) {
+    Log::shouldReceive('channel')->with('audit')->never();
+
+    pushSentinel($this->token, sentinelPayload($running()))->assertOk();
+
+    Queue::assertPushed(PushServerUpdateJob::class, 1);
+});
+
 it('updates the heartbeat even when the job is skipped', function () use ($running) {
     pushSentinel($this->token, sentinelPayload($running()))->assertOk();
 
@@ -138,6 +147,26 @@ it('dispatches the job when container state changes', function () use ($running)
     Queue::assertPushed(PushServerUpdateJob::class, 2);
 });
 
+it('dispatches the job when only the container restart count changes', function () {
+    $beforeRestart = [['name' => 'app-1', 'state' => 'running', 'restart_count' => 0]];
+    $afterRestart = [['name' => 'app-1', 'state' => 'running', 'restart_count' => 1]];
+
+    pushSentinel($this->token, sentinelPayload($beforeRestart))->assertOk();
+    pushSentinel($this->token, sentinelPayload($afterRestart))->assertOk();
+
+    Queue::assertPushed(PushServerUpdateJob::class, 2);
+});
+
+it('ignores health status changes while container lifecycle state is unchanged', function () {
+    $healthy = [['name' => 'app-1', 'state' => 'running', 'health_status' => 'healthy']];
+    $unhealthy = [['name' => 'app-1', 'state' => 'running', 'health_status' => 'unhealthy']];
+
+    pushSentinel($this->token, sentinelPayload($healthy))->assertOk();
+    pushSentinel($this->token, sentinelPayload($unhealthy))->assertOk();
+
+    Queue::assertPushed(PushServerUpdateJob::class, 1);
+});
+
 it('ignores disk percentage changes (excluded from the hash)', function () use ($running) {
     pushSentinel($this->token, sentinelPayload($running(), diskPercentage: 42.0))->assertOk();
     pushSentinel($this->token, sentinelPayload($running(), diskPercentage: 88.0))->assertOk();
@@ -176,4 +205,25 @@ it('rejects an invalid token without dispatching', function () use ($running) {
     pushSentinel('not-a-real-token', sentinelPayload($running()))->assertUnauthorized();
 
     Queue::assertNotPushed(PushServerUpdateJob::class);
+});
+
+it('dispatches a complete snapshot after an identical partial snapshot', function () use ($running) {
+    $partialPayload = sentinelPayload($running()) + [
+        'snapshot' => [
+            'version' => 1,
+            'complete' => false,
+        ],
+    ];
+
+    $completePayload = sentinelPayload($running()) + [
+        'snapshot' => [
+            'version' => 1,
+            'complete' => true,
+        ],
+    ];
+
+    pushSentinel($this->token, $partialPayload)->assertOk();
+    pushSentinel($this->token, $completePayload)->assertOk();
+
+    Queue::assertPushed(PushServerUpdateJob::class, 2);
 });

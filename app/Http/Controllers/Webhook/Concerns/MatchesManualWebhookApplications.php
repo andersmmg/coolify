@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Webhook\Concerns;
 use App\Models\Application;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Str;
 
 trait MatchesManualWebhookApplications
 {
@@ -79,8 +78,8 @@ trait MatchesManualWebhookApplications
 
         if (is_array($parts) && isset($parts['scheme'])) {
             $path = data_get($parts, 'path');
-        } elseif (Str::startsWith($gitRepository, 'git@') && str_contains($gitRepository, ':')) {
-            $path = Str::after($gitRepository, ':');
+        } elseif (($scp = parseScpStyleGitUrl($gitRepository)) !== null) {
+            $path = $scp['path'];
         } else {
             $path = $gitRepository;
         }
